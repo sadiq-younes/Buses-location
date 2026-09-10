@@ -156,18 +156,18 @@ with col_map:
     current_map_center = st.session_state["map_center"]
     current_zoom = st.session_state["map_zoom"]
 
-  # Render Folium Map with CartoDB Dark Matter
+  # Render Folium Map using default OpenStreetMap
   m = folium.Map(
       location=current_map_center,
       zoom_start=current_zoom,
-      tiles="CartoDB dark_matter",
+      tiles="OpenStreetMap",
   )
 
   LocateControl(position="topleft").add_to(m)
 
   for _, row in df_filtered.iterrows():
     popup_content = f"""
-        <div style="font-family: sans-serif; min-width: 130px; color: #111;">
+        <div style="font-family: sans-serif; min-width: 130px;">
             <b>Route {row['route_id']}</b> (Bus #{row['vehicle_id']})<br>
             <b>Speed:</b> {row['speed_kmh']} km/h<br>
             <b>Bearing:</b> {row['bearing']}°
@@ -183,10 +183,9 @@ with col_map:
     folium.CircleMarker(
         location=[row["latitude"], row["longitude"]],
         radius=10 if is_tracked else 6,
-        color="#ffffff" if is_tracked else "#00b0ff",
-        weight=2 if is_tracked else 1,
+        color="#f39c12" if is_tracked else "#2c3e50",
         fill=True,
-        fill_color="#ffd700" if is_tracked else "#00e5ff",
+        fill_color="#f1c40f" if is_tracked else "#e74c3c",
         fill_opacity=0.95 if is_tracked else 0.85,
         tooltip=(
             f"🎯 Route {row['route_id']} (#{row['vehicle_id']})"
