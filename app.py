@@ -16,13 +16,16 @@ st.set_page_config(
 )
 
 st.title("🚌 Wellington Real-Time Bus Tracker")
+st.caption(
+    "Live GTFS-Realtime vehicle location tracking powered by Metlink Open Data"
+)
 
 # --- SECURE API KEY LOAD ---
 metlink_api_key = st.secrets.get("METLINK_API_KEY", "")
 
 # --- SESSION STATE FOR MAP VIEWPORT ---
 if "map_center" not in st.session_state:
-  st.session_state["map_center"] = [-41.2865, 174.7762]
+  st.session_state["map_center"] = [-41.2865, 174.7762]  # Wellington City Centre
 if "map_zoom" not in st.session_state:
   st.session_state["map_zoom"] = 13
 
@@ -83,16 +86,19 @@ def fetch_gtfs_rt_positions(api_key: str) -> pd.DataFrame:
 
 
 if not metlink_api_key:
-  st.error("⚠️ `METLINK_API_KEY` missing from Streamlit secrets.")
+  st.error(
+      "⚠️ `METLINK_API_KEY` missing from Streamlit secrets. Please configure"
+      " `.streamlit/secrets.toml`."
+  )
   st.stop()
 
 df_vehicles = fetch_gtfs_rt_positions(metlink_api_key)
 
-# --- MAP & TABLE LAYOUT (7:3 ratio for maximum map area) ---
+# --- MAP & TABLE LAYOUT (7:3 ratio) ---
 col_map, col_table = st.columns([7, 3], gap="small")
 
 with col_map:
-  # Floating controls popover positioned directly above/over map area
+  # Controls via Floating Popover
   with st.popover("⚙️ Map Controls & Vehicle Tracking"):
     st.markdown("### Settings & Filters")
     refresh_rate = st.slider(
@@ -120,7 +126,7 @@ with col_map:
         "🎯 Follow Vehicle:", options=bus_options
     )
 
-  # Calculate map focus based on popover tracking selection
+  # Calculate map focus based on tracking selection
   if selected_tracking_bus != "None (Free View)":
     tracked_veh_id = (
         selected_tracking_bus.split("(#")[1].replace(")", "").strip()
@@ -140,16 +146,18 @@ with col_map:
     current_map_center = st.session_state["map_center"]
     current_zoom = st.session_state["map_zoom"]
 
-  # Render Folium Map
+  # Render Folium Map with CartoDB Dark Matter
   m = folium.Map(
-      location=current_map_center, zoom_start=current_zoom, tiles="OpenStreetMap"
+      location=current_map_center,
+      zoom_start=current_zoom,
+      tiles="CartoDB dark_matter",
   )
 
   LocateControl(position="topleft").add_to(m)
 
   for _, row in df_filtered.iterrows():
     popup_content = f"""
-        <div style="font-family: sans-serif; min-width: 130px;">
+        <div style="font-family: sans-serif; min-width: 130px; color: #111;">
             <b>Route {row['route_id']}</b> (Bus #{row['vehicle_id']})<br>
             <b>Speed:</b> {row['speed_kmh']} km/h<br>
             <b>Bearing:</b> {row['bearing']}°
@@ -165,9 +173,10 @@ with col_map:
     folium.CircleMarker(
         location=[row["latitude"], row["longitude"]],
         radius=10 if is_tracked else 6,
-        color="#f39c12" if is_tracked else "#2c3e50",
+        color="#ffffff" if is_tracked else "#00b0ff",
+        weight=2 if is_tracked else 1,
         fill=True,
-        fill_color="#f1c40f" if is_tracked else "#e74c3c",
+        fill_color="#ffd700" if is_tracked else "#00e5ff",
         fill_opacity=0.95 if is_tracked else 0.85,
         tooltip=(
             f"🎯 Route {row['route_id']} (#{row['vehicle_id']})"
