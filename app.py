@@ -15,6 +15,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# --- CUSTOM CSS FOR COMPACT TABLE TEXT & LAYOUT ---
+st.markdown(
+    """
+    <style>
+    /* Reduce font size and padding in Streamlit DataFrames */
+    [data-testid="stTable"] td, [data-testid="stTable"] th,
+    div[data-testid="stDataFrame"] div[role="gridcell"],
+    div[data-testid="stDataFrame"] div[role="columnheader"] {
+        font-size: 12px !important;
+        padding: 2px 4px !important;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 st.title("🚌 Wellington Real-Time Bus Tracker")
 
 # --- SECURE API KEY LOAD ---
@@ -50,6 +66,8 @@ def fetch_gtfs_rt_positions(api_key: str) -> pd.DataFrame:
         pos = veh.position
         trip = veh.trip
 
+        speed_mps = pos.speed if pos.HasField("speed") else 0.0
+
         records.append({
             "vehicle_id": (
                 str(veh.vehicle.id) if veh.HasField("vehicle") else "N/A"
@@ -63,9 +81,7 @@ def fetch_gtfs_rt_positions(api_key: str) -> pd.DataFrame:
             "latitude": pos.latitude,
             "longitude": pos.longitude,
             "bearing": pos.bearing if pos.HasField("bearing") else 0,
-            "speed_kmh": (
-                round(pos.speed * 3.6, 1) if pos.HasField("speed") else 0
-            ),
+            "speed_kmh": round(float(speed_mps) * 3.6, 1),
             "timestamp": (
                 pd.to_datetime(veh.timestamp, unit="s", utc=True).tz_convert(
                     "Pacific/Auckland"
@@ -140,16 +156,18 @@ with col_map:
     current_map_center = st.session_state["map_center"]
     current_zoom = st.session_state["map_zoom"]
 
-  # Render Folium Map
+  # Render Folium Map with CartoDB Dark Matter
   m = folium.Map(
-      location=current_map_center, zoom_start=current_zoom, tiles="OpenStreetMap"
+      location=current_map_center,
+      zoom_start=current_zoom,
+      tiles="CartoDB dark_matter",
   )
 
   LocateControl(position="topleft").add_to(m)
 
   for _, row in df_filtered.iterrows():
     popup_content = f"""
-        <div style="font-family: sans-serif; min-width: 130px;">
+        <div style="font-family: sans-serif; min-width: 130px; color: #111;">
             <b>Route {row['route_id']}</b> (Bus #{row['vehicle_id']})<br>
             <b>Speed:</b> {row['speed_kmh']} km/h<br>
             <b>Bearing:</b> {row['bearing']}°
@@ -165,9 +183,10 @@ with col_map:
     folium.CircleMarker(
         location=[row["latitude"], row["longitude"]],
         radius=10 if is_tracked else 6,
-        color="#f39c12" if is_tracked else "#2c3e50",
+        color="#ffffff" if is_tracked else "#00b0ff",
+        weight=2 if is_tracked else 1,
         fill=True,
-        fill_color="#f1c40f" if is_tracked else "#e74c3c",
+        fill_color="#ffd700" if is_tracked else "#00e5ff",
         fill_opacity=0.95 if is_tracked else 0.85,
         tooltip=(
             f"🎯 Route {row['route_id']} (#{row['vehicle_id']})"
@@ -200,19 +219,32 @@ with col_map:
 with col_table:
   st.subheader("📋 Active Fleet")
   if not df_vehicles.empty:
-    st.metric("Total Active Buses", len(df_vehicles))
-    st.metric("Filtered On Map", len(df_filtered))
+    m_col1, m_col2 = st.columns(2)
+    m_col1.metric("Total Active", len(df_vehicles))
+    m_col2.metric("Filtered", len(df_filtered))
+
+    df_display = df_filtered.sort_values(by="speed_kmh", ascending=False)
 
     st.dataframe(
-        df_filtered[["route_id", "vehicle_id", "speed_kmh"]],
+        df_display[
+            ["route_id", "vehicle_id", "speed_kmh", "latitude", "longitude"]
+        ],
         column_config={
-            "route_id": "Route",
-            "vehicle_id": "Bus ID",
-            "speed_kmh": "Speed (km/h)",
+            "route_id": st.column_config.TextColumn("Route", width="small"),
+            "vehicle_id": st.column_config.TextColumn("Bus ID", width="small"),
+            "speed_kmh": st.column_config.NumberColumn(
+                "Speed", format="%.1f km/h", width="small"
+            ),
+            "latitude": st.column_config.NumberColumn(
+                "Lat", format="%.4f", width="small"
+            ),
+            "longitude": st.column_config.NumberColumn(
+                "Lon", format="%.4f", width="small"
+            ),
         },
         use_container_width=True,
         hide_index=True,
-        height=420,
+        height=430,
     )
 
 # --- AUTO-REFRESH RERUN ---
