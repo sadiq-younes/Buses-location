@@ -12,7 +12,7 @@ st.set_page_config(
     page_title="Wellington Live Bus Tracker",
     page_icon="🚌",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Collapse default sidebar to maximize main area
+    initial_sidebar_state="collapsed",
 )
 
 st.title("🚌 Wellington Real-Time Bus Tracker")
@@ -20,9 +20,12 @@ st.caption(
     "Live GTFS-Realtime vehicle location tracking powered by Metlink Open Data"
 )
 
+# --- SECURE API KEY LOAD (NO UI INPUT) ---
+metlink_api_key = st.secrets.get("METLINK_API_KEY", "")
+
 # --- SESSION STATE FOR MAP VIEWPORT ---
 if "map_center" not in st.session_state:
-  st.session_state["map_center"] = [-41.2865, 174.7762]
+  st.session_state["map_center"] = [-41.2865, 174.7762]  # Wellington City Centre
 if "map_zoom" not in st.session_state:
   st.session_state["map_zoom"] = 13
 
@@ -86,70 +89,67 @@ def fetch_gtfs_rt_positions(api_key: str) -> pd.DataFrame:
 col_controls, col_map, col_table = st.columns([2, 5, 3], gap="medium")
 
 # ==========================================
-# COLUMN 1 (Ratio 2): CONTROLS & SETTINGS
+# COLUMN 1 (Ratio 2): CONTROLS
 # ==========================================
 with col_controls:
   st.subheader("⚙️ Controls")
 
-  metlink_api_key = st.text_input(
-      "Metlink API Key",
-      value=st.secrets.get("METLINK_API_KEY", ""),
-      type="password",
-      help="Get a free key from opendata.metlink.org.nz",
-  )
-
-  refresh_rate = st.slider(
-      "Refresh Interval (s)", min_value=5, max_value=60, value=20, step=5
-  )
-
-  route_filter = st.text_input("Filter Route ID:", value="")
-
-  # Fetch data if API key is present
-  if metlink_api_key:
-    df_vehicles = fetch_gtfs_rt_positions(metlink_api_key)
-  else:
-    df_vehicles = pd.DataFrame()
-
-  # Route Filter logic
-  if not df_vehicles.empty and route_filter.strip():
-    df_filtered = df_vehicles[
-        df_vehicles["route_id"].str.lower() == route_filter.strip().lower()
-    ]
-  else:
-    df_filtered = df_vehicles
-
-  # Vehicle Tracking Selectbox
-  bus_options = ["None (Free View)"]
-  if not df_filtered.empty:
-    bus_options += [
-        f"Route {row['route_id']} (#{row['vehicle_id']})"
-        for _, row in df_filtered.iterrows()
-    ]
-
-  selected_tracking_bus = st.selectbox(
-      "🎯 Follow Vehicle:",
-      options=bus_options,
-  )
-
-  # Calculate center coordinates based on selection
-  if selected_tracking_bus != "None (Free View)":
-    tracked_veh_id = (
-        selected_tracking_bus.split("(#")[1].replace(")", "").strip()
+  if not metlink_api_key:
+    st.error(
+        "⚠️ `METLINK_API_KEY` missing from Streamlit secrets. Please configure"
+        " `.streamlit/secrets.toml`."
     )
-    tracked_bus_data = df_filtered[df_filtered["vehicle_id"] == tracked_veh_id]
+  else:
+    refresh_rate = st.slider(
+        "Refresh Interval (s)", min_value=5, max_value=60, value=20, step=5
+    )
 
-    if not tracked_bus_data.empty:
-      current_map_center = [
-          tracked_bus_data.iloc[0]["latitude"],
-          tracked_bus_data.iloc[0]["longitude"],
+    route_filter = st.text_input("Filter Route ID:", value="")
+
+    df_vehicles = fetch_gtfs_rt_positions(metlink_api_key)
+
+    # Route Filter logic
+    if not df_vehicles.empty and route_filter.strip():
+      df_filtered = df_vehicles[
+          df_vehicles["route_id"].str.lower() == route_filter.strip().lower()
       ]
-      current_zoom = 16
+    else:
+      df_filtered = df_vehicles
+
+    # Vehicle Tracking Selectbox
+    bus_options = ["None (Free View)"]
+    if not df_filtered.empty:
+      bus_options += [
+          f"Route {row['route_id']} (#{row['vehicle_id']})"
+          for _, row in df_filtered.iterrows()
+      ]
+
+    selected_tracking_bus = st.selectbox(
+        "🎯 Follow Vehicle:",
+        options=bus_options,
+    )
+
+    # Calculate center coordinates based on selection
+    if selected_tracking_bus != "None (Free View)":
+      tracked_veh_id = (
+          selected_tracking_bus.split("(#")[1].replace(")", "").strip()
+      )
+      tracked_bus_data = df_filtered[
+          df_filtered["vehicle_id"] == tracked_veh_id
+      ]
+
+      if not tracked_bus_data.empty:
+        current_map_center = [
+            tracked_bus_data.iloc[0]["latitude"],
+            tracked_bus_data.iloc[0]["longitude"],
+        ]
+        current_zoom = 16
+      else:
+        current_map_center = st.session_state["map_center"]
+        current_zoom = st.session_state["map_zoom"]
     else:
       current_map_center = st.session_state["map_center"]
       current_zoom = st.session_state["map_zoom"]
-  else:
-    current_map_center = st.session_state["map_center"]
-    current_zoom = st.session_state["map_zoom"]
 
 # ==========================================
 # COLUMN 2 (Ratio 5): MAP VIEW
@@ -158,7 +158,7 @@ with col_map:
   st.subheader("📍 Live Map View")
 
   if not metlink_api_key:
-    st.warning("Please enter a Metlink API Key to view live buses.")
+    st.info("Configuration needed: Add your Metlink API key in secrets.")
   elif df_vehicles.empty:
     st.info("No active bus data received.")
   else:
@@ -226,7 +226,7 @@ with col_map:
 with col_table:
   st.subheader("📋 Active Fleet")
 
-  if not df_vehicles.empty:
+  if metlink_api_key and not df_vehicles.empty:
     st.metric("Total Active Buses", len(df_vehicles))
     st.metric("Filtered On Map", len(df_filtered))
 
