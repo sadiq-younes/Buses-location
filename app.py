@@ -16,16 +16,13 @@ st.set_page_config(
 )
 
 st.title("🚌 Wellington Real-Time Bus Tracker")
-st.caption(
-    "Live GTFS-Realtime vehicle location tracking powered by Metlink Open Data"
-)
 
-# --- SECURE API KEY LOAD (NO UI INPUT) ---
+# --- SECURE API KEY LOAD ---
 metlink_api_key = st.secrets.get("METLINK_API_KEY", "")
 
 # --- SESSION STATE FOR MAP VIEWPORT ---
 if "map_center" not in st.session_state:
-  st.session_state["map_center"] = [-41.2865, 174.7762]  # Wellington City Centre
+  st.session_state["map_center"] = [-41.2865, 174.7762]
 if "map_zoom" not in st.session_state:
   st.session_state["map_zoom"] = 13
 
@@ -85,28 +82,23 @@ def fetch_gtfs_rt_positions(api_key: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-# --- 2:5:3 THREE-COLUMN LAYOUT ---
-col_controls, col_map, col_table = st.columns([2, 5, 3], gap="medium")
+if not metlink_api_key:
+  st.error("⚠️ `METLINK_API_KEY` missing from Streamlit secrets.")
+  st.stop()
 
-# ==========================================
-# COLUMN 1 (Ratio 2): CONTROLS
-# ==========================================
-with col_controls:
-  st.subheader("⚙️ Controls")
+df_vehicles = fetch_gtfs_rt_positions(metlink_api_key)
 
-  if not metlink_api_key:
-    st.error(
-        "⚠️ `METLINK_API_KEY` missing from Streamlit secrets. Please configure"
-        " `.streamlit/secrets.toml`."
-    )
-  else:
+# --- MAP & TABLE LAYOUT (7:3 ratio for maximum map area) ---
+col_map, col_table = st.columns([7, 3], gap="small")
+
+with col_map:
+  # Floating controls popover positioned directly above/over map area
+  with st.popover("⚙️ Map Controls & Vehicle Tracking"):
+    st.markdown("### Settings & Filters")
     refresh_rate = st.slider(
         "Refresh Interval (s)", min_value=5, max_value=60, value=20, step=5
     )
-
     route_filter = st.text_input("Filter Route ID:", value="")
-
-    df_vehicles = fetch_gtfs_rt_positions(metlink_api_key)
 
     # Route Filter logic
     if not df_vehicles.empty and route_filter.strip():
@@ -125,108 +117,89 @@ with col_controls:
       ]
 
     selected_tracking_bus = st.selectbox(
-        "🎯 Follow Vehicle:",
-        options=bus_options,
+        "🎯 Follow Vehicle:", options=bus_options
     )
 
-    # Calculate center coordinates based on selection
-    if selected_tracking_bus != "None (Free View)":
-      tracked_veh_id = (
-          selected_tracking_bus.split("(#")[1].replace(")", "").strip()
-      )
-      tracked_bus_data = df_filtered[
-          df_filtered["vehicle_id"] == tracked_veh_id
-      ]
+  # Calculate map focus based on popover tracking selection
+  if selected_tracking_bus != "None (Free View)":
+    tracked_veh_id = (
+        selected_tracking_bus.split("(#")[1].replace(")", "").strip()
+    )
+    tracked_bus_data = df_filtered[df_filtered["vehicle_id"] == tracked_veh_id]
 
-      if not tracked_bus_data.empty:
-        current_map_center = [
-            tracked_bus_data.iloc[0]["latitude"],
-            tracked_bus_data.iloc[0]["longitude"],
-        ]
-        current_zoom = 16
-      else:
-        current_map_center = st.session_state["map_center"]
-        current_zoom = st.session_state["map_zoom"]
+    if not tracked_bus_data.empty:
+      current_map_center = [
+          tracked_bus_data.iloc[0]["latitude"],
+          tracked_bus_data.iloc[0]["longitude"],
+      ]
+      current_zoom = 16
     else:
       current_map_center = st.session_state["map_center"]
       current_zoom = st.session_state["map_zoom"]
-
-# ==========================================
-# COLUMN 2 (Ratio 5): MAP VIEW
-# ==========================================
-with col_map:
-  st.subheader("📍 Live Map View")
-
-  if not metlink_api_key:
-    st.info("Configuration needed: Add your Metlink API key in secrets.")
-  elif df_vehicles.empty:
-    st.info("No active bus data received.")
   else:
-    m = folium.Map(
-        location=current_map_center,
-        zoom_start=current_zoom,
-        tiles="OpenStreetMap",
+    current_map_center = st.session_state["map_center"]
+    current_zoom = st.session_state["map_zoom"]
+
+  # Render Folium Map
+  m = folium.Map(
+      location=current_map_center, zoom_start=current_zoom, tiles="OpenStreetMap"
+  )
+
+  LocateControl(position="topleft").add_to(m)
+
+  for _, row in df_filtered.iterrows():
+    popup_content = f"""
+        <div style="font-family: sans-serif; min-width: 130px;">
+            <b>Route {row['route_id']}</b> (Bus #{row['vehicle_id']})<br>
+            <b>Speed:</b> {row['speed_kmh']} km/h<br>
+            <b>Bearing:</b> {row['bearing']}°
+        </div>
+        """
+
+    is_tracked = (
+        selected_tracking_bus != "None (Free View)"
+        and row["vehicle_id"]
+        == selected_tracking_bus.split("(#")[1].replace(")", "").strip()
     )
 
-    LocateControl(position="topleft").add_to(m)
+    folium.CircleMarker(
+        location=[row["latitude"], row["longitude"]],
+        radius=10 if is_tracked else 6,
+        color="#f39c12" if is_tracked else "#2c3e50",
+        fill=True,
+        fill_color="#f1c40f" if is_tracked else "#e74c3c",
+        fill_opacity=0.95 if is_tracked else 0.85,
+        tooltip=(
+            f"🎯 Route {row['route_id']} (#{row['vehicle_id']})"
+            if is_tracked
+            else f"Route {row['route_id']} (#{row['vehicle_id']})"
+        ),
+        popup=folium.Popup(popup_content, max_width=200),
+    ).add_to(m)
 
-    for _, row in df_filtered.iterrows():
-      popup_content = f"""
-            <div style="font-family: sans-serif; min-width: 130px;">
-                <b>Route {row['route_id']}</b> (Bus #{row['vehicle_id']})<br>
-                <b>Speed:</b> {row['speed_kmh']} km/h<br>
-                <b>Bearing:</b> {row['bearing']}°
-            </div>
-            """
+  map_data = st_folium(
+      m,
+      width="100%",
+      height=550,
+      key=f"bus_map_{selected_tracking_bus}",
+      returned_objects=["center", "zoom"],
+  )
 
-      is_tracked = (
-          selected_tracking_bus != "None (Free View)"
-          and row["vehicle_id"]
-          == selected_tracking_bus.split("(#")[1].replace(")", "").strip()
-      )
+  if (
+      selected_tracking_bus == "None (Free View)"
+      and map_data
+      and map_data.get("center")
+      and map_data.get("zoom")
+  ):
+    st.session_state["map_center"] = [
+        map_data["center"]["lat"],
+        map_data["center"]["lng"],
+    ]
+    st.session_state["map_zoom"] = map_data["zoom"]
 
-      folium.CircleMarker(
-          location=[row["latitude"], row["longitude"]],
-          radius=10 if is_tracked else 6,
-          color="#f39c12" if is_tracked else "#2c3e50",
-          fill=True,
-          fill_color="#f1c40f" if is_tracked else "#e74c3c",
-          fill_opacity=0.95 if is_tracked else 0.85,
-          tooltip=(
-              f"🎯 Route {row['route_id']} (#{row['vehicle_id']})"
-              if is_tracked
-              else f"Route {row['route_id']} (#{row['vehicle_id']})"
-          ),
-          popup=folium.Popup(popup_content, max_width=200),
-      ).add_to(m)
-
-    map_data = st_folium(
-        m,
-        width="100%",
-        height=520,
-        key=f"bus_map_{selected_tracking_bus}",
-        returned_objects=["center", "zoom"],
-    )
-
-    if (
-        selected_tracking_bus == "None (Free View)"
-        and map_data
-        and map_data.get("center")
-        and map_data.get("zoom")
-    ):
-      st.session_state["map_center"] = [
-          map_data["center"]["lat"],
-          map_data["center"]["lng"],
-      ]
-      st.session_state["map_zoom"] = map_data["zoom"]
-
-# ==========================================
-# COLUMN 3 (Ratio 3): METRICS & DATA TABLE
-# ==========================================
 with col_table:
   st.subheader("📋 Active Fleet")
-
-  if metlink_api_key and not df_vehicles.empty:
+  if not df_vehicles.empty:
     st.metric("Total Active Buses", len(df_vehicles))
     st.metric("Filtered On Map", len(df_filtered))
 
@@ -239,10 +212,9 @@ with col_table:
         },
         use_container_width=True,
         hide_index=True,
-        height=380,
+        height=420,
     )
 
 # --- AUTO-REFRESH RERUN ---
-if metlink_api_key:
-  time.sleep(refresh_rate)
-  st.rerun()
+time.sleep(refresh_rate)
+st.rerun()
